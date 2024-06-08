@@ -11,6 +11,10 @@ import os
 # Load environment variables from .env file
 load_dotenv()
 
+os.environ['AWS_ACCESS_KEY_ID'] = os.getenv('AWS_ACCESS_KEY_ID')
+os.environ['AWS_SECRET_ACCESS_KEY'] = os.getenv('AWS_SECRET_ACCESS_KEY')
+
+
 def generate_embeddings(texts):
     """Generate embeddings for a list of texts using Langchain"""
     api_key = os.getenv('OPENAI_API_KEY')

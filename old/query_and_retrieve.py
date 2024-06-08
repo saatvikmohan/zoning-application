@@ -7,12 +7,16 @@ from langchain.embeddings import OpenAIEmbeddings
 import pinecone
 from pinecone import Pinecone, ServerlessSpec
 from openai import OpenAI
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
+
+os.environ['AWS_ACCESS_KEY_ID'] = os.getenv('AWS_ACCESS_KEY_ID')
+os.environ['AWS_SECRET_ACCESS_KEY'] = os.getenv('AWS_SECRET_ACCESS_KEY')
 
 # AWS and Pinecone configurations
 aws_bucket_name = os.getenv('S3_BUCKET_NAME', 'nashville-minutes')
@@ -25,7 +29,6 @@ pinecone_environment = os.getenv('PINECONE_ENVIRONMENT', 'default')
 s3 = boto3.client('s3')
 
 client = OpenAI(
-    # This is the default and can be omitted
     api_key=os.environ.get("OPENAI_API_KEY"),
 )
 
@@ -67,7 +70,6 @@ def fetch_section_from_s3(bucket_name, section_id, path):
     except Exception as e:
         logger.error(f"An error occurred while fetching the file: {e}")
         return None
-    
 
 def generate_answer(query, section_content):
     response = client.chat.completions.create(
@@ -82,13 +84,16 @@ def generate_answer(query, section_content):
 
 def query_and_answer(query):
     matches = search_similar_documents(query)
+    results = []
 
     for match in matches:
         section_id = match['id']
         logger.info(f"Section ID: {section_id}, Score: {match['score']}")
         section_content = fetch_section_from_s3(aws_bucket_name, section_id, 'extracted-txt-files')
-        answer = generate_answer(query, section_content)
-        logger.info(f"Answer based on section {section_id}: {answer}")
+        if section_content:
+            answer = generate_answer(query, section_content)
+            results.append((section_id, answer))
+    return results
 
 if __name__ == "__main__":
     import argparse
@@ -97,4 +102,6 @@ if __name__ == "__main__":
     parser.add_argument('--query', type=str, required=True, help="Query to search and answer")
     
     args = parser.parse_args()
-    query_and_answer(args.query)
+    results = query_and_answer(args.query)
+    for section_id, answer in results:
+        print(f"Section ID: {section_id}\nAnswer: {answer}\n")

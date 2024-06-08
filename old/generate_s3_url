@@ -1,0 +1,26 @@
+import boto3
+import os
+
+# Load AWS credentials from environment variables
+aws_access_key_id = os.environ.get('AWS_ACCESS_KEY_ID')
+aws_secret_access_key = os.environ.get('AWS_SECRET_ACCESS_KEY')
+aws_region = 'us-west-2'
+
+# S3 bucket name and key
+bucket_name = 'zoning-project'
+object_key = 'nashville/staff-reports/'  # Specify a file name
+
+# Expiration time for the pre-signed URL (in seconds)
+expiration_time = 10000  # 1 hour
+
+# Create a Boto3 S3 client
+s3_client = boto3.client('s3', region_name=aws_region,
+                         aws_access_key_id=aws_access_key_id,
+                         aws_secret_access_key=aws_secret_access_key)
+
+# Generate a pre-signed URL for uploading files to S3
+presigned_url = s3_client.generate_presigned_url('put_object',
+                                                 Params={'Bucket': bucket_name, 'Key': object_key},
+                                                 ExpiresIn=expiration_time)
+
+print("Pre-signed URL for uploading files:", presigned_url)

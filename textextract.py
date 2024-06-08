@@ -7,6 +7,11 @@ import boto3
 from botocore.exceptions import ClientError
 import time
 import os
+import spacy
+spacy.load('en_core_web_sm')
+
+os.environ['AWS_ACCESS_KEY_ID'] = os.getenv('AWS_ACCESS_KEY_ID')
+os.environ['AWS_SECRET_ACCESS_KEY'] = os.getenv('AWS_SECRET_ACCESS_KEY')
 
 EXTRACT_PATH = os.getenv('EXTRACT_PATH')
 
@@ -59,15 +64,31 @@ def get_document_text_detection(job_id):
 
     return pages
 
-def extract_text_from_responses(responses):
-    """Extract text from Textract responses"""
-    text = ''
+def extract_text_from_responses_with_blocks(responses):
+    """Extract text from Textract responses and organize by block types"""
+    sections = []
+    current_section = []
+
     for response in responses:
         blocks = response.get('Blocks', [])
         for block in blocks:
             if block['BlockType'] == 'LINE':
-                text += block['Text'] + '\n'
-    return text
+                current_section.append(block['Text'])
+            elif block['BlockType'] == 'TABLE':
+                if current_section:
+                    sections.append("\n".join(current_section))
+                    current_section = []
+                sections.append("TABLE: " + json.dumps(block))
+            elif block['BlockType'] == 'KEY_VALUE_SET':
+                if current_section:
+                    sections.append("\n".join(current_section))
+                    current_section = []
+                sections.append("FORM: " + json.dumps(block))
+
+    if current_section:
+        sections.append("\n".join(current_section))
+
+    return sections
 
 def upload_to_s3(bucket, key, content):
     """Upload a string as a file to S3"""
@@ -78,10 +99,23 @@ def upload_to_s3(bucket, key, content):
     except ClientError as e:
         print(f"An error occurred: {e}")
 
-def split_text_into_sections(text):
-    """Split text into sections based on headings"""
-    sections = re.split(r'(?m)^\s*[A-Z\s]+\s*$', text)
-    sections = [section.strip() for section in sections if section.strip()]
+def split_text_into_sections_nlp(text):
+    """Split text into sections using NLP"""
+    nlp = spacy.load("en_core_web_sm")
+    doc = nlp(text)
+    sections = []
+    current_section = []
+
+    for sent in doc.sents:
+        if sent.text.isupper():  # Assuming headings are in uppercase
+            if current_section:
+                sections.append(" ".join(current_section))
+                current_section = []
+        current_section.append(sent.text)
+
+    if current_section:
+        sections.append(" ".join(current_section))
+
     return sections
 
 def process_pdf(bucket_name, s3_key):
@@ -89,14 +123,22 @@ def process_pdf(bucket_name, s3_key):
     job_id = start_document_text_detection(bucket_name, s3_key)
     if job_id:
         responses = get_document_text_detection(job_id)
-        extracted_text = extract_text_from_responses(responses)
+        extracted_sections = extract_text_from_responses_with_blocks(responses)
         
         # Save full text
+        full_text = "\n".join(extracted_sections)
         text_s3_key = s3_key.replace('.pdf', '.txt')
-        upload_to_s3(bucket_name, text_s3_key, extracted_text)
+        upload_to_s3(bucket_name, text_s3_key, full_text)
         
-        # Split text into sections and save each section
-        sections = split_text_into_sections(extracted_text)
+        # Split text into sections using NLP
+        sections = []
+        for section in extracted_sections:
+            if section.startswith("TABLE:") or section.startswith("FORM:"):
+                sections.append(section)
+            else:
+                sections.extend(split_text_into_sections_nlp(section))
+        
+        # Save each section
         for i, section in enumerate(sections):
             section_s3_key = s3_key.replace('.pdf', f'_section_{i}.txt')
             upload_to_s3(bucket_name, section_s3_key, section)
