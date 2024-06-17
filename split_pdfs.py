@@ -41,7 +41,7 @@ def split_pdf_to_individual_items(bucket, prefix):
             if "Item #" in text:
                 if item_start_page is not None:
                     # Save the previous item PDF
-                    save_item_pdf(reader, item_start_page, page_num - 1, bucket, item_number)
+                    save_item_pdf(reader, item_start_page, page_num - 1, bucket, item_number, document)
                     item_number += 1
 
                 # Mark the start of the new item
@@ -49,9 +49,9 @@ def split_pdf_to_individual_items(bucket, prefix):
 
         # Save the last item PDF
         if item_start_page is not None:
-            save_item_pdf(reader, item_start_page, num_pages - 1, bucket, item_number)
+            save_item_pdf(reader, item_start_page, num_pages - 1, bucket, item_number, document)
 
-def save_item_pdf(reader, start_page, end_page, bucket, item_number):
+def save_item_pdf(reader, start_page, end_page, bucket, item_number, document_name):
     writer = PdfWriter()
     for page_num in range(start_page, end_page + 1):
         writer.add_page(reader.pages[page_num])
@@ -60,8 +60,8 @@ def save_item_pdf(reader, start_page, end_page, bucket, item_number):
     with open(item_pdf_path, 'wb') as f:
         writer.write(f)
 
-    # Upload to S3
-    item_s3_key = f"nashville/individual-request-pdfs/item_{item_number}.pdf"
+    # Upload to S3 with new key format
+    item_s3_key = f"nashville/staff-reports-individual-pdfs/{os.path.basename(document_name)}_item_{item_number}.pdf"
     s3 = boto3.client('s3')
     print(f"Uploading {item_pdf_path} to {bucket}/{item_s3_key}")
     s3.upload_file(item_pdf_path, bucket, item_s3_key)
@@ -69,6 +69,7 @@ def save_item_pdf(reader, start_page, end_page, bucket, item_number):
 
 if __name__ == "__main__":
     bucket_name = 'zoning-project'
-    prefix = 'nashville/original_pdfs/'
+    prefix = 'nashville/staff-reports/'
 
     split_pdf_to_individual_items(bucket_name, prefix)
+

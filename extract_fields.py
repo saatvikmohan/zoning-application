@@ -1,6 +1,16 @@
 import os
 import boto3
 import json
+from openai import OpenAI
+from geopy.geocoders import Nominatim
+from geopy.exc import GeocoderTimedOut, GeocoderUnavailable
+from decimal import Decimal
+from dotenv import load_dotenv
+import concurrent.futures
+
+import os
+import boto3
+import json
 from dotenv import load_dotenv
 from openai import OpenAI
 from textextract import start_document_text_detection, get_document_text_detection
@@ -17,7 +27,7 @@ load_dotenv()
 def store_to_dynamodb(fields):
     dynamodb = boto3.resource('dynamodb')
     # table = dynamodb.Table('nashville-zoning-2')
-    table = dynamodb.Table('test')
+    table = dynamodb.Table('nashville-zoning')
     
     # Convert float values to Decimal
     for key, value in fields.items():
@@ -30,17 +40,6 @@ def store_to_dynamodb(fields):
     
     table.put_item(Item=fields)
 
-def extract_text_from_pdf(bucket, document):
-    job_id = start_document_text_detection(bucket, document)
-    if job_id:
-        responses = get_document_text_detection(job_id)
-        text = ''
-        for response in responses:
-            for item in response["Blocks"]:
-                if item["BlockType"] == "LINE":
-                    text += item["Text"] + "\n"
-        return text
-    return ""
 
 def safe_geocode(geolocator, address, attempt=1, max_attempts=3):
     try:
@@ -52,6 +51,7 @@ def safe_geocode(geolocator, address, attempt=1, max_attempts=3):
         else:
             print("Geocoding failed after max retries")
             return None
+
 
 
 def extract_fields_with_gpt(text, pdf_link):
@@ -171,22 +171,22 @@ def extract_fields_with_gpt(text, pdf_link):
             extracted_fields['pdf_link'] = pdf_link
             print("PDF link:", pdf_link)
 
-            geolocator = Nominatim(user_agent="zoning-application")
-            addresses = extracted_fields.get("Addresses", [])
-            if addresses:
-                # Assuming the first address is the primary one for simplicity
-                primary_address = addresses[0] + ", Nashville, TN"
-                location = safe_geocode(geolocator, primary_address)
-                if location:
-                    print("Location:", location)
-                    extracted_fields['latitude'] = location.latitude
-                    extracted_fields['longitude'] = location.longitude
-                else:
-                    extracted_fields['latitude'] = None
-                    extracted_fields['longitude'] = None
-            else:
-                extracted_fields['latitude'] = None
-                extracted_fields['longitude'] = None
+            # geolocator = Nominatim(user_agent="zoning-application")
+            # addresses = extracted_fields.get("Addresses", [])
+            # if addresses:
+            #     # Assuming the first address is the primary one for simplicity
+            #     primary_address = addresses[0] + ", Nashville, TN"
+            #     location = safe_geocode(geolocator, primary_address)
+            #     if location:
+            #         print("Location:", location)
+            #         extracted_fields['latitude'] = location.latitude
+            #         extracted_fields['longitude'] = location.longitude
+            #     else:
+            #         extracted_fields['latitude'] = None
+            #         extracted_fields['longitude'] = None
+            # else:
+            #     extracted_fields['latitude'] = None
+            #     extracted_fields['longitude'] = None
 
             return extracted_fields
         except json.JSONDecodeError as e:
@@ -199,41 +199,62 @@ def extract_fields_with_gpt(text, pdf_link):
     return None
 
 
-def process_individual_items(bucket, start_index=0):
+def process_text_files(bucket, start_index=0):
     s3 = boto3.client('s3')
-    prefix = 'nashville/staff-reports-individual-pdfs/'
+    prefix = 'nashville/staff-reports-individual-txt-files/'
+    continuation_token = None
+    counter = start_index  # Initialize counter to start_index
 
-    response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
-    if 'Contents' not in response:
-        print(f"No files found in {bucket}/{prefix}")
-        return
+    while True:
+        response = s3.list_objects_v2(
+            Bucket=bucket,
+            Prefix=prefix,
+            ContinuationToken=continuation_token
+        )
+        if 'Contents' not in response:
+            print(f"No files found in {bucket}/{prefix}")
+            break
 
-    counter = 0
-    for obj in response['Contents']:
-        if counter < start_index:
-            counter += 1
-            continue
+        for obj in response['Contents'][start_index:]:  # Start from the given index
+            document = obj['Key']
+            if document.endswith('/'):  # Skip directories
+                continue
 
-        document = obj['Key']
-        if document.endswith('/'):  # Skip directories
-            continue
+            text_obj = s3.get_object(Bucket=bucket, Key=document)
+            text = text_obj['Body'].read().decode('utf-8')
+            pdf_link = f"https://{bucket}.s3.amazonaws.com/{document.replace('txt', 'pdf')}"
+            print(f"Processing document {counter}: {pdf_link}")
 
-        text = extract_text_from_pdf(bucket, document)
-        if text:
-            pdf_link = f"https://{bucket}.s3.amazonaws.com/{document}"
-            print(f"Document Index: {counter}")
             fields = extract_fields_with_gpt(text, pdf_link)
             if fields is not None:
                 store_to_dynamodb(fields)
             else:
                 print(f"Failed to extract fields or decode JSON for PDF: {pdf_link}")
-        else:
-            print(f"No text extracted from PDF: {pdf_link}")
+            print(f"Fields extracted and stored in DynamoDB for document {counter}")
 
-        counter += 1
+            counter += 1  # Increment the counter after processing each document
+
+        # Check if there is more data to process
+        if 'NextContinuationToken' in response:
+            continuation_token = response['NextContinuationToken']
+        else:
+            break  # Exit loop if no more data
+
+        # Geocode addresses
+        # addresses = fields.get("Addresses", [])
+        # geocoded_addresses = []
+        # for address in addresses:
+        #     location = safe_geocode(geolocator, address)
+        #     if location:
+        #         geocoded_addresses.append({
+        #             "address": address,
+        #             "latitude": Decimal(location.latitude),
+        #             "longitude": Decimal(location.longitude)
+        #         })
+        # fields["Geocoded Addresses"] = geocoded_addresses
 
 if __name__ == "__main__":
     bucket_name = 'zoning-project'
-    start_index = 0  # Start from the 632nd item
-    process_individual_items(bucket_name, start_index)
+    start_index = 0
+    process_text_files(bucket_name, start_index)
 

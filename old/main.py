@@ -7,6 +7,9 @@ from botocore.exceptions import NoCredentialsError, PartialCredentialsError
 from dotenv import load_dotenv
 import os
 
+import openai
+import json
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -89,8 +92,6 @@ def extract_text_from_pdf(bucket, document):
             text += item["Text"] + "\n"
     return text
 
-import openai
-import json
 
 def extract_fields_with_gpt(text, pdf_link):
     openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -100,7 +101,8 @@ def extract_fields_with_gpt(text, pdf_link):
         "Requested by, Date, Staff Recommendation Description, Staff Recommendation, "
         "Existing Zoning Type, Proposed Zoning Type, Location, Location Description, "
         "Community Character Policy, Community Character Policy ID, Community Plan, "
-        "Number units proposed, Number of acres, Number of units currently, Request Type.\n\n"
+        "Number units proposed, Number of acres, Number of units currently, Request Type, "
+        "Parcel ID, Map ID.\n\n"
         "Here is an example:\n\n"
         "Example:\n"
         "Input Text:\n"
@@ -137,6 +139,8 @@ def extract_fields_with_gpt(text, pdf_link):
         "  \"Number of acres\": \"5.55\",\n"
         "  \"Number of units currently\": \"N/A\",\n"
         "  \"Request Type\": \"major plan amendment\",\n"
+        "  \"Parcel ID\": [\"189\", \"190\", \"191\", \"192\", \"208\"],\n"
+        "  \"Map ID\": \"091-12\",\n"
         "  \"pdf_link\": \"s3://your-bucket-name/PDF_FILES_ORIGINAL/item_1.pdf\"\n"
         "}\n\n"
         "Text:\n" + text
