@@ -34,8 +34,8 @@ def pdf_to_image(pdf_body):
 
 def store_to_dynamodb(fields):
     dynamodb = boto3.resource('dynamodb')
-    table = dynamodb.Table('test2')
-    # table = dynamodb.Table('nashville-zoning-db')
+    # table = dynamodb.Table('test2')
+    table = dynamodb.Table('nashville-zoning-db')
     
     # Convert float values to Decimal
     for key, value in fields.items():
@@ -256,8 +256,9 @@ def process_pdf_files(bucket, start_index=0):
     already_done = set()
     try:
         with open('already_done.csv', mode='r') as file:
-            reader = csv.reader(file)
-            already_done = {rows[0] for rows in reader}
+            reader = csv.DictReader(file)
+            already_done = {row['pdf_link'] for row in reader}
+            print(f"Loaded {len(already_done)} already processed links from already_done.csv")
     except FileNotFoundError:
         print("already_done.csv not found. Proceeding without it.")
 
