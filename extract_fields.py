@@ -257,7 +257,7 @@ def process_pdf_files(bucket, start_index=0):
     try:
         with open('already_done.csv', mode='r') as file:
             reader = csv.DictReader(file)
-            already_done = {row['pdf_link'] for row in reader}
+            already_done = {row['Pdf link'] for row in reader}
             print(f"Loaded {len(already_done)} already processed links from already_done.csv")
     except FileNotFoundError:
         print("already_done.csv not found. Proceeding without it.")
