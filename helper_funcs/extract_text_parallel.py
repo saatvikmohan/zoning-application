@@ -1,6 +1,6 @@
 import os
 import boto3
-from textextract import start_document_text_detection, get_document_text_detection
+from helper_funcs.textextract import start_document_text_detection, get_document_text_detection
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor, as_completed
 

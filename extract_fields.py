@@ -12,7 +12,7 @@ import os
 import boto3
 import json
 from dotenv import load_dotenv
-from textextract import start_document_text_detection, get_document_text_detection
+from helper_funcs.textextract import start_document_text_detection, get_document_text_detection
 from decimal import Decimal
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut, GeocoderUnavailable
@@ -34,8 +34,7 @@ def pdf_to_image(pdf_body):
 
 def store_to_dynamodb(fields):
     dynamodb = boto3.resource('dynamodb')
-    # table = dynamodb.Table('test2')
-    table = dynamodb.Table('nashville-zoning-db')
+    table = dynamodb.Table('nashville-zoning-july-4')
     
     # Convert float values to Decimal
     for key, value in fields.items():
@@ -43,10 +42,15 @@ def store_to_dynamodb(fields):
             fields[key] = Decimal(str(value))
     
     # Create a unique partition key by combining Project Name and Date
-    partition_key = f"{fields['Project Name']}_{fields['Date']}"
+    partition_key = f"{fields['Project Number']}_{fields['Date']}"
     fields['id'] = partition_key
     
-    table.put_item(Item=fields)
+    try:
+        print(f"Attempting to store item: {fields}")  # Debugging line to log the item being stored
+        table.put_item(Item=fields)
+        print(f"Successfully stored item with id: {partition_key}")  # Debugging line to confirm success
+    except Exception as e:
+        print(f"Failed to store item with id: {partition_key}. Error: {e}")  # Debugging line to log errors
 
 
 def safe_geocode(geolocator, address, attempt=1, max_attempts=3):
@@ -72,17 +76,20 @@ def extract_fields_with_gpt(images, pdf_link, counter):
     instructions = (
         "Extract the following fields from the image and output in JSON format.\n"
         "Request Type (either SP Amendment, Zone Change, Preliminary SP, Final Plat, Concept Plan, or Major Plan Amendment), "
-        "Applicant, Project Name, Council District (as an integer), School District (as an integer), Council Person, School District Representative, "
+        "Item # (string), Applicant, Project Number (e.g., Zone Change 2018Z-099PR-001), Project ID (a series of 3 alphanumeric strings separated by dashes, e.g., 2018Z-099PR-001), Project Name (String), "
+        "Deferrals (string), Staff Reviewer (string), Council District (as an integer), School District (as an integer), Council Person, School District Representative, "
         "Requested by, Date (in YYYY-MM-DD format), Staff Recommendation Description, Staff Recommendation (as 'defer', 'approve', or 'conditional'), "
         "Existing Zoning Type ID (list of codes only), Proposed Zoning Type ID (list of codes only), Addresses (list of addresses without descriptors like 'unnumbered' - if the street number is not available, just put the street name), "
         "Location Description, Community Character Policy, Community Character Policy ID (list of codes only), Community Plan, "
         "Number of units proposed (as float), Number of acres (as float), Number of units currently (as float), "
-        "Parcel ID (list of numbers that are usually 3 digits, remove any descriptors like 'Part of Parcel(s)'), Map ID (list of strings - usually numbers separated by a dash), Summary (based on the analysis. Keep it brief - under 50 words). Note: Parcel ID and Map ID are usually found in a format like \"Map 069-12, Parcel 048\"\n"
+        "Parcel ID (list of at least 11 digit numbers formed by combining the Map and Parcel numbers with trailing 0s. There should be at least 6 digits for the map (letters are allowed and should not be dropped. These don't count for the digit counts) and 5 for the parcel. Zeros should only be added at the end of the map ID and parcel ID after all hyphens. Format of input should always look like \"Map [Numbers], Parcel(s) [Numbers]\". If it's not, put 'N/A'). For example, 'Map 091-13-4-G, Parcel(s) 001-002, 900' should be converted to '091134G00100, 091134G00200, 091134G00900'). Additional examples: 'Map 092-08, Parcel 388' should be converted to '09208038800', 'Map 087, Parcel(s) 202' should be converted to '08700020200'), "
+        "Summary (string of 300 characters max)\n"
         "Here are some examples:\n\n"
         "Example 1:\n"
         "Input Text:\n"
-        "Item #1 Major Plan Amendment 2023CP-003-005\n"
-        "Project Name: Bordeaux-Whites Creek-Haynes Trinity Community Plan Amendment\n"
+        "Item #8\n"
+        "Project No: Zone Change 2018Z-099PR-001\n"
+        "Project Name: Masonry Specialty Office Building\n"
         "Council District: 02 - Toombs\n"
         "School District: 01 - Gentry\n"
         "Requested by: Metro Planning Department, applicant; various owners.\n"
@@ -91,13 +98,18 @@ def extract_fields_with_gpt(images, pdf_link, counter):
         "Staff Recommendation: Defer to the June 13, 2024, Planning Commission meeting.\n"
         "Applicant Request: Amend Bordeaux-Whites Creek-Haynes Trinity Community Plan to change the community character policy.\n"
         "Major Plan Amendment: A request to amend the Bordeaux-Whites Creek-Haynes Trinity Community Plan by changing the policy from Urban Neighborhood Evolving (T4 NE) to Urban Neighborhood Center (T4 NC) for properties located at the southwest corner of 110 Cliff Drive and Buena Vista Pike, zoned R8 (One and Two-Family Residential) (5.55 acres).\n"
-        "2024Z-058PR-001\nMap 119-05, Parcel 292-294, part of 291\n11, South Nashville\n16 (Ginny Welsch)\n"
+        "2024Z-058PR-001\nMap 071-11, Parcel(s) 037-038, 068, 070-071\n"
         "Staff Recommendation: Staff recommends deferral to the June 13, 2024, Planning Commission meeting.\n\n"
         "Extracted Fields:\n"
         "{\n"
         "  \"Request Type\": \"major plan amendment\",\n"
+        "  \"Item #\": \"8\",\n"
         "  \"Applicant\": \"Metro Planning Department, applicant; various owners\",\n"
-        "  \"Project Name\": \"Bordeaux-Whites Creek-Haynes Trinity Community Plan Amendment\",\n"
+        "  \"Project Number\": \"Zone Change 2018Z-099PR-001\",\n"
+        "  \"Project ID\": \"2018Z-099PR-001\",\n"
+        "  \"Project Name\": \"Masonry Specialty Office Building\",\n"
+        "  \"Deferrals\": \"This item was deferred from the April 25, 2024, and May 9, 2024, Planning Commission meetings. No public hearing was held.\",\n"
+        "  \"Staff Reviewer\": \"Clark\",\n"
         "  \"Council District\": 2,\n"
         "  \"School District\": 1,\n"
         "  \"Council Person\": \"Toombs\",\n"
@@ -116,11 +128,11 @@ def extract_fields_with_gpt(images, pdf_link, counter):
         "  \"Number of units proposed\": \"N/A\",\n"
         "  \"Number of acres\": \"5.55\",\n"
         "  \"Number of units currently\": \"N/A\",\n"
-        "  \"Parcel ID\": [\"291\", \"292\", \"293\", \"294\"],\n"
-        "  \"Map ID\": [\"119-05\"],\n"
-        "  \"Summary\": \"The application proposes a multi-family residential development along the corridor and provides improved pedestrian facilities along Central Pike and a portion of South New Hope Road.\"\n"
+        "  \"Parcel ID\": [\"07111003700\", \"07111003800\", \"07111006800\", \"07111007000\", \"07111007100\"],\n"
+        "  \"Summary\": \"The application proposes a multi-family residential development along the corridor and provides improved pedestrian facilities along Central Pike and a portion of South New Hope Road.\",\n"
         "}\n"
     )
+
 
     retry_count = 3
     for attempt in range(retry_count):
@@ -164,7 +176,7 @@ def extract_fields_with_gpt(images, pdf_link, counter):
                     {"role": "user", "content": image_data, "detail": "low"}
                 ],
                 response_format={"type": "json_object"},
-                max_tokens=500,
+                max_tokens=700,
             )
 
             response_text = response.choices[0].message.content
@@ -196,6 +208,11 @@ def extract_fields_with_gpt(images, pdf_link, counter):
                         (isinstance(value, str) and value.strip() == '') or 
                         (isinstance(value, list) and all(v == 'N/A' for v in value))):
                         extracted_fields[key] = None
+
+                # Convert 'Request Type' to lowercase
+                if 'Request Type' in extracted_fields and isinstance(extracted_fields['Request Type'], str):
+                    extracted_fields['Request Type'] = extracted_fields['Request Type'].lower()
+
 
                 # Convert 'Council District' to integer, set to None if not possible
                 try:
@@ -248,7 +265,7 @@ import csv
 
 def process_pdf_files(bucket, start_index=0):
     s3 = boto3.client('s3', region_name='us-west-2')
-    prefix = 'nashville/staff-reports-individual-pdfs/'
+    prefix = 'nashville/staff-reports-split-pdfs/'
     continuation_token = None
     counter = start_index
 
@@ -287,17 +304,20 @@ def process_pdf_files(bucket, start_index=0):
                 counter += 1
                 continue
 
-            pdf_obj = s3.get_object(Bucket=bucket, Key=document)
-            images = pdf_to_image(pdf_obj['Body'])
-            fields = extract_fields_with_gpt(images, pdf_link=pdf_link, counter=counter)
-            if fields:
-                store_to_dynamodb(fields)
-                # Add the processed link to already_done.csv
-                with open('already_done.csv', mode='a', newline='') as file:
-                    writer = csv.writer(file)
-                    writer.writerow([pdf_link])
-            else:
-                print(f"Failed to extract fields for PDF: {document}")
+            try:
+                pdf_obj = s3.get_object(Bucket=bucket, Key=document)
+                images = pdf_to_image(pdf_obj['Body'])
+                fields = extract_fields_with_gpt(images, pdf_link=pdf_link, counter=counter)
+                if fields:
+                    store_to_dynamodb(fields)
+                    # Add the processed link to already_done.csv
+                    with open('already_done.csv', mode='a', newline='') as file:
+                        writer = csv.writer(file)
+                        writer.writerow([pdf_link])
+                else:
+                    print(f"Failed to extract fields for PDF: {document}")
+            except Exception as e:
+                print(f"Error processing PDF {document}: {e}")  # Debugging line to log errors
 
             counter += 1
             print(f"Processed {counter} PDF files")
@@ -306,7 +326,6 @@ def process_pdf_files(bucket, start_index=0):
             continuation_token = response['NextContinuationToken']
         else:
             break
-
 
 if __name__ == "__main__":
     bucket_name = 'zoning-project'

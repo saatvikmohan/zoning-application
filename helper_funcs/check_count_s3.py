@@ -20,6 +20,6 @@ def count_objects_in_prefix(bucket, prefix):
 
 # Usage
 bucket_name = 'zoning-project'
-prefix = 'nashville/staff-reports-individual-txt-files/'
+prefix = 'nashville/staff-reports-split-pdfs/'
 number_of_objects = count_objects_in_prefix(bucket_name, prefix)
 print(f"Number of objects: {number_of_objects}")
